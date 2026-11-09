@@ -13,6 +13,27 @@
         统计信息
       </el-tag>
 
+      <!-- 一键重建：触发 GitHub Actions 跑完整构建 -->
+      <div style="margin: 10px 0 20px; padding: 14px 18px; border-radius: 8px;
+                  background: #f7f9fe; border: 1px solid #e4e8f0">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px">
+          <span style="font-weight: 600; color: #606266">发布后同步</span>
+          <el-button type="primary" size="small" :loading="rebuilding"
+                     @click="triggerRebuild">
+            {{ rebuilding ? '构建中…' : '重新构建并部署' }}
+          </el-button>
+          <span v-if="rebuildMsg" :style="{ fontSize: '13px', color: rebuildOk ? '#67C23A' : '#F56C6C' }">
+            {{ rebuildMsg }}
+          </span>
+          <a v-if="rebuildUrl" :href="rebuildUrl" target="_blank"
+             style="font-size: 13px; color: var(--themeBackground)">查看进度</a>
+        </div>
+        <div style="font-size: 12px; color: #909399; margin-top: 6px">
+          新增或修改文章后点此，约 3–5 分钟完成。访客一直能立即看到新内容，
+          这一步只是让搜索引擎抓到的静态页面也更新。
+        </div>
+      </div>
+
       <!-- 总览 -->
       <div>
         <div class="history-title">总览</div>
@@ -189,7 +210,12 @@
   export default {
     data() {
       return {
-        historyInfo: {}
+        historyInfo: {},
+        // 一键重建按钮状态
+        rebuilding: false,
+        rebuildMsg: '',
+        rebuildOk: true,
+        rebuildUrl: ''
       }
     },
 
@@ -206,6 +232,27 @@
     },
 
     methods: {
+      /** 触发 GitHub Actions 重建 */
+      triggerRebuild() {
+        this.rebuilding = true
+        this.rebuildMsg = ''
+        this.rebuildUrl = ''
+        this.$http.post(this.$constant.baseURL.replace('/legacy', '') + '/rebuild', {}, true)
+          .then((res) => {
+            this.rebuildOk = true
+            this.rebuildMsg = res.data.message || '已触发重建'
+            this.rebuildUrl = (res.data.url || '').replace('/workflows/deploy-frontend.yml', '')
+            this.$message({ message: '已触发重建，约 3-5 分钟后生效', type: 'success' })
+          })
+          .catch((err) => {
+            this.rebuildOk = false
+            this.rebuildMsg = err.message || '触发失败'
+            this.$message({ message: err.message || '触发失败', type: 'error' })
+          })
+          .finally(() => { this.rebuilding = false })
+      },
+
+
       getHistoryInfo() {
         this.$http.get(this.$constant.baseURL + "/webInfo/getHistoryInfo", {}, true)
           .then((res) => {

@@ -9,6 +9,12 @@ export interface Env {
   B2_ACCESS_KEY_ID: string
   /** Brevo 邮件服务 */
   BREVO_API_KEY: string
+  /** IndexNow 主动推送 */
+  INDEXNOW_KEY?: string
+  /** 站点宿主（不含协议），IndexNow 用 */
+  SITE_HOST?: string
+  /** GitHub PAT，用于触发 Actions 重建 */
+  GITHUB_TOKEN?: string
   MAIL_FROM: string
   MAIL_FROM_NAME: string
   B2_SECRET_ACCESS_KEY: string

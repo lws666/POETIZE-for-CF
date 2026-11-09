@@ -18,6 +18,7 @@ import siteConfig from './routes/siteConfig'
 import postAccess from './routes/postAccess'
 import { seo } from './routes/seo'
 import mail from './routes/mail'
+import rebuild from './routes/rebuild'
 
 const app = new Hono<AuthCtx & { Bindings: Env }>()
 
@@ -123,6 +124,9 @@ app.route('/api/post-access', postAccess)
 
 /* 邮箱验证码 */
 app.route('/api/mail', mail)
+
+/* 一键重建（触发 GitHub Actions） */
+app.route('/api/rebuild', rebuild)
 
 /* SEO：sitemap / robots / rss（直接挂在根路径，前端转发过来） */
 app.route('/', seo)
