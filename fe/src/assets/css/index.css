@@ -169,6 +169,20 @@ body {
     z-index: 100;
 }
 
+/**
+ * 手机端隐藏看板娘。
+ *
+ * live2d.js 里已有 `screen.width > 768` 的加载判断，但不够：
+ * 预渲染出的 HTML 里可能已经带了看板娘 DOM（构建时按桌面尺寸跑的），
+ * 手机访问时直接显示出来。这条 CSS 作为兜底，双保险。
+ */
+@media screen and (max-width: 768px) {
+    #waifu,
+    #waifu-toggle {
+        display: none !important;
+    }
+}
+
 #waifu-tips {
     border: unset;
     animation: unset;

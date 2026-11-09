@@ -181,6 +181,21 @@ async function main() {
       }
       const len = textLen
 
+      /**
+       * 移除看板娘相关 DOM，再落盘。
+       *
+       * 原因：预渲染跑在桌面尺寸（默认 800×600 以上），
+       * live2d.js 的 `screen.width > 768` 判断成立，看板娘会被
+       * insertAdjacentHTML 写进 body。这份 HTML 一旦被手机访问，
+       * 直接显示出来 —— 等于绕过了「手机端不显示」的判断。
+       *
+       * 桌面端不受影响：页面加载后 Vue 重新执行 live2d.js，
+       * 判断通过会重新插入。
+       */
+      await page.evaluate(() => {
+        document.querySelectorAll('#waifu, #waifu-toggle').forEach(el => el.remove())
+      })
+
       const html = await page.content()
 
       /**
