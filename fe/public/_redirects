@@ -1,2 +1,13 @@
-# SPA fallback
-/*  /index.html  200
+# 预渲染后不再需要通配 fallback
+#
+# 之前这里是 `/*  /index.html  200`，它会把 /article/69 这类路径
+# 强制改写成根目录的 index.html，导致预渲染出的
+# article/69/index.html 永远不被返回（爬虫拿到 0 字节）。
+#
+# 现在每个路由都有自己的 index.html，Pages 会按路径直接命中。
+# 只保留未预渲染路径（如后台 /admin/*、/verify）的兜底，
+# 这些页面不需要 SEO，返回空壳也无所谓。
+
+/admin/*    /index.html    200
+/verify     /index.html    200
+/postEdit   /index.html    200
