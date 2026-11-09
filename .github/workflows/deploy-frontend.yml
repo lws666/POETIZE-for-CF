@@ -6,6 +6,7 @@ on:
     paths:
       - 'fe/**'
       - '.github/workflows/deploy-frontend.yml'
+  # 支持后台「一键重建」按钮触发
   workflow_dispatch:
 
 concurrency:
@@ -31,12 +32,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 预渲染依赖 Puppeteer + Chromium。
+      # ubuntu-latest 缺一批系统库（libnss3、libatk 等），不装会启动失败。
+      - name: Install Chromium for prerender
+        run: npx puppeteer browsers install chrome
+
+      - name: Install Chromium system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libasound2t64 libpango-1.0-0 libcairo2 libxss1
+
       - name: Install wrangler
         run: npm install --no-save wrangler@4
 
       - name: Build
         # vue-cli 的 webpack 4 在 Node 17+ 需要这个环境变量，否则 OpenSSL 报错
+        # build 里已包含 gen-seo（同步 sitemap）和 prerender（预渲染）
         run: NODE_OPTIONS=--openssl-legacy-provider npm run build
+        env:
+          # 预渲染要跑 14 个路由，默认超时可能不够
+          PUPPETEER_SKIP_DOWNLOAD: 'false'
+
+      - name: Verify prerender output
+        # 冒烟检查：爬虫视角能否读到正文
+        run: |
+          echo "=== 预渲染产物检查 ==="
+          for f in dist/index.html dist/article/69.html dist/sort.html; do
+            if [ -f "$f" ]; then
+              echo "  ✓ $f  $(wc -c < $f) 字节"
+            else
+              echo "  ✗ $f 缺失"
+            fi
+          done
+          # 至少要有 5 个文章页
+          N=$(ls dist/article/*.html 2>/dev/null | wc -l)
+          echo "  文章页: $N 个"
+          if [ "$N" -lt 1 ]; then echo "预渲染失败：没有生成文章页"; exit 1; fi
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
