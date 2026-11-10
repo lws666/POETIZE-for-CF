@@ -199,13 +199,28 @@ article.get('/getArticleById', async (c) => {
   const sorts = deriveSorts(rows)
   const sortIdByName = new Map(sorts.map(s => [s.sortName, s.id]))
 
+  /**
+   * 必须算 labelIds 并传给 toLegacyArticle。
+   *
+   * 之前漏了这一步，导致返回的 article.labelId 是 null、label.id 是 0。
+   * 前端点「订阅」时传的就是 this.article.labelId ——
+   * 拿到 null 就变成 `?flag=true`，后端报「缺少 labelId」。
+   *
+   * 和 listArticle 用同一份派生逻辑，保证 id 一致。
+   */
+  const allLabels = deriveLabels(rows, sorts)
+  const labelIds = new Map<string, number>()
+  for (const l of allLabels) {
+    if (!labelIds.has(l.labelName)) labelIds.set(l.labelName, l.id)
+  }
+
   // 解析当前用户（Bearer 或 Cookie）
   const user = await currentUserLite(c.env.DB, c.req.header('Authorization'), c.req.header('Cookie'))
 
   const pwd = c.req.query('password') ?? c.req.query('viewValue') ?? undefined
   const access = checkAccess(row, user, pwd)
 
-  const base = toLegacyArticle(row, { sortIdByName, withContent: true })
+  const base = toLegacyArticle(row, { sortIdByName, labelIds, withContent: true })
 
   if (!access.allowed) {
     return legacyOk({

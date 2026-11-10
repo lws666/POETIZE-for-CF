@@ -10,18 +10,26 @@ import constant from "./constant";
 // 注意：live2d_path 参数应使用绝对路径
 const live2d_path = constant.live2d_path;
 
-// 加载 waifu.css live2d.min.js
-if (screen.width > 768) {
-  Promise.all([
-    loadExternalResource(live2d_path + "waifu.css", "css"),
-    loadExternalResource(live2d_path + "live2d.min.js", "js")
-  ]).then(() => {
-    initWidget({
-      waifuPath: constant.baseURL + constant.waifuPath,
-      cdnPath: constant.cdnPath
-    });
+/**
+ * 加载 waifu.css / live2d.min.js
+ *
+ * 原来有 `if (screen.width > 768)` 判断，只在电脑端加载。
+ * 但手机上（尤其 Via 的「电脑模式」只改 UA 不改 screen.width）
+ * 永远看不到看板娘。
+ *
+ * 现在改成**所有设备都加载**，靠 CSS 做尺寸适配：
+ *   手机：缩小到 120×180，放右下角，不挡内容
+ *   平板/电脑：正常尺寸
+ */
+Promise.all([
+  loadExternalResource(live2d_path + "waifu.css", "css"),
+  loadExternalResource(live2d_path + "live2d.min.js", "js")
+]).then(() => {
+  initWidget({
+    waifuPath: constant.baseURL + constant.waifuPath,
+    cdnPath: constant.cdnPath
   });
-}
+});
 
 // 封装异步加载资源的方法
 function loadExternalResource(url, type) {
@@ -242,7 +250,7 @@ function loadWidget(config) {
     showMessage(message, 4000, 10);
     if (!modelList) await loadModelList();
     // const target = randomSelection(modelList.models[modelId]);
-    const target = "HyperdimensionNeptunia/blanc_swimwear";
+    const target = "HyperdimensionNeptunia/blanc_normal";
     loadlive2d("live2d", `${cdnPath}model/${target}/index.json`);
   }
 

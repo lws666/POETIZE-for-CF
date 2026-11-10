@@ -279,6 +279,7 @@
   const proButton = () => import( "./common/proButton");
   const videoPlayer = () => import( "./common/videoPlayer");
   import MarkdownIt from 'markdown-it';
+  import { setArticleSchema, setArticleMeta } from '../utils/seo';
 
   export default {
     components: {
@@ -310,14 +311,23 @@
       if (!this.$common.isEmpty(this.id)) {
         this.getArticle(localStorage.getItem("article_password_" + this.id));
 
-        if ("0" !== localStorage.getItem("showSubscribe")) {
-          this.$notify({
-            title: '文章订阅',
+        /**
+         * 文章订阅提示 —— 已改为 $message 轻提示。
+         *
+         * 原来用 $notify + duration:0（永不自动关闭），
+         * 实测点 × 后：
+         *   localStorage 标记写进去了，但通知 DOM 依然 display:flex 留着
+         *   刷新页面又出现，用户以为"点不掉"
+         *
+         * 换成 5 秒自动消失的轻提示，不拦截操作，也不留残留。
+         */
+        if ('0' !== localStorage.getItem('showSubscribe')) {
+          this.$message({
+            message: '点击文章下方小手，可订阅或取消订阅该专栏',
             type: 'success',
-            message: '点击文章下方小手 - 订阅/取消订阅专栏（标签）',
-            duration: 0,
-            onClose: () => localStorage.setItem("showSubscribe", "0")
-          });
+            duration: 5000,
+            onClose: () => localStorage.setItem('showSubscribe', '0')
+          })
         }
       }
     },
@@ -513,6 +523,32 @@
                 return;
               }
               this.article = res.data;
+              /**
+               * 文章页 SEO：标题、og、canonical、Article 结构化数据。
+               *
+               * 路由守卫只知道「这是文章页」，拿不到文章标题；
+               * 这里补上真实信息，否则浏览器标签页和分享卡片
+               * 显示的是站点名而不是文章名。
+               */
+              try {
+                const a = this.article;
+                const cover = a.articleCover
+                  ? (a.articleCover.startsWith('http') ? a.articleCover : location.origin + a.articleCover)
+                  : '';
+                setArticleMeta({
+                  title: a.articleTitle,
+                  desc: a.articleExcerpt || '',
+                  cover
+                });
+                setArticleSchema({
+                  title: a.articleTitle,
+                  desc: a.articleExcerpt || '',
+                  cover,
+                  date: a.createTime,
+                  updated: a.updateTime,
+                  author: (this.$store.state.webInfo || {}).author
+                });
+              } catch (e) { /* SEO 失败不影响正文 */ }
               /**
                * 解锁成功：关掉可能残留的密码框与提示框。
                * 否则用户登录后回到文章，底部还挂着「该文章需要登录」的弹窗。

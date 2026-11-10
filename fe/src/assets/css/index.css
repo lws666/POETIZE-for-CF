@@ -170,16 +170,48 @@ body {
 }
 
 /**
- * 手机端隐藏看板娘。
+ * 看板娘位置：右下角。
  *
- * live2d.js 里已有 `screen.width > 768` 的加载判断，但不够：
- * 预渲染出的 HTML 里可能已经带了看板娘 DOM（构建时按桌面尺寸跑的），
- * 手机访问时直接显示出来。这条 CSS 作为兜底，双保险。
+ * CDN 的 waifu.css 默认 left: 0（左下角），会和侧栏作者卡片重叠。
+ * 改到右下角避开侧栏。
+ */
+#waifu {
+    left: auto !important;
+    right: 0 !important;
+}
+
+/**
+ * 手机端：缩小显示，不隐藏。
+ *
+ * 之前是 display:none 直接隐藏，但 Via 等浏览器的「电脑模式」
+ * 只改 UA 不改 screen.width，导致手机上永远看不到。
+ * 现在改成所有设备都显示，手机端缩到 48%，贴右下角，不挡内容。
  */
 @media screen and (max-width: 768px) {
-    #waifu,
-    #waifu-toggle {
-        display: none !important;
+    #waifu {
+        transform: scale(.48) !important;
+        transform-origin: bottom right !important;
+        right: 0 !important;
+        bottom: 0 !important;
+    }
+
+    #waifu-tips {
+        max-width: 170px !important;
+        font-size: 12px !important;
+        padding: 8px 12px !important;
+    }
+
+    #waifu-tool {
+        transform: scale(.85);
+        transform-origin: bottom right;
+    }
+}
+
+/* 窄屏平板：略缩 */
+@media screen and (min-width: 769px) and (max-width: 1100px) {
+    #waifu {
+        transform: scale(.82) !important;
+        transform-origin: bottom right !important;
     }
 }
 

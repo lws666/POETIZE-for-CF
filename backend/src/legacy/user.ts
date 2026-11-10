@@ -437,5 +437,50 @@ user.post('/updateForForgetPassword', async (c) => {
   return legacyOk({ updated: true })
 })
 
+
+/**
+ * GET /user/subscribe —— 订阅 / 取消订阅专栏（标签）
+ *
+ * 前端 article.vue 点小手时调用，参数：
+ *   labelId  标签 id
+ *   flag     true=订阅，false=取消
+ *
+ * 数据存 users.subscribe，格式是 JSON 数组字符串，如 ["6","9"]。
+ * 之前这个接口完全没实现，点了没反应。
+ */
+user.get('/subscribe', async (c) => {
+  const me = await currentUser(c)
+  if (!me) return legacyErr('请先登录', 401)
+
+  const labelId = String(c.req.query('labelId') || '').trim()
+  const flag = String(c.req.query('flag')) === 'true'
+  if (!labelId) return legacyErr('缺少 labelId', 400)
+
+  // 解析当前订阅列表
+  let list: string[] = []
+  try {
+    const parsed = JSON.parse(me.subscribe || '[]')
+    if (Array.isArray(parsed)) list = parsed.map(String)
+  } catch { list = [] }
+
+  const has = list.includes(labelId)
+
+  if (flag && !has) {
+    list.push(labelId)
+  } else if (!flag && has) {
+    list = list.filter(x => x !== labelId)
+  }
+
+  const next = JSON.stringify(list)
+  await c.env.DB.prepare(`UPDATE users SET subscribe=?1 WHERE id=?2`)
+    .bind(next, me.id).run()
+
+  // 返回最新的用户对象，前端会 commit 到 Vuex
+  const row = await c.env.DB.prepare(`SELECT * FROM users WHERE id=?1`)
+    .bind(me.id).first<UserRow>()
+
+  return legacyOk(toUserVO(row!))
+})
+
 /** 其余 user/* 占位 */
 user.all('/*', (c) => legacyOk({}))
