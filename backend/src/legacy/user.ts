@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { Env, UserRow } from '../lib/types'
+import { rateOkDb } from '../lib/ratelimit'
 import { findUserByName } from '../lib/auth'
 import { hashPassword, randomToken, sha256, verifyPassword, nowIso } from '../lib/crypto'
 import { legacyOk, legacyErr } from './response'
@@ -67,13 +68,18 @@ async function readBody(c: { req: { header: (k: string) => string | undefined; p
 }
 
 /* ── 限流 ─────────────────────────────────────────────────── */
-const attempts = new Map<string, { n: number; reset: number }>()
-function allowed(ip: string, max = 10, win = 60_000): boolean {
-  const now = Date.now()
-  const cur = attempts.get(ip)
-  if (!cur || now > cur.reset) { attempts.set(ip, { n: 1, reset: now + win }); return true }
-  cur.n++
-  return cur.n <= max
+/**
+ * 登录限流 —— 改用 D1 持久化。
+ *
+ * 原来是内存 Map，实测在多 isolate 环境下形同虚设
+ * （和之前修的评论/友链限流是同一个问题）：
+ * 每次请求落在不同实例，各自计数都是 1，永远触发不了阈值。
+ *
+ * 现在走 rate_limit 表，全实例共享计数。
+ * 阈值：同一 IP 1 分钟最多 10 次登录尝试。
+ */
+async function allowed(db: D1Database, ip: string, max = 10, win = 60_000): Promise<boolean> {
+  return rateOkDb(db, 'login', ip, max, win)
 }
 
 /* ── 建会话 ───────────────────────────────────────────────── */
@@ -92,7 +98,7 @@ async function createSession(db: D1Database, userId: number) {
 /* ── POST /user/login ─────────────────────────────────────── */
 user.post('/login', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') || 'unknown'
-  if (!allowed(ip)) return legacyErr('尝试过于频繁，请稍后再试', 429)
+  if (!(await allowed(c.env.DB, ip))) return legacyErr('尝试过于频繁，请稍后再试', 429)
 
   const b = await readBody(c)
   const account = (b.account || b.username || '').trim()
@@ -300,10 +306,24 @@ user.get('/getCodeForForgetPassword', async (c) => {
     .prepare(`UPDATE email_codes SET used=1 WHERE email=?1 AND used=0`)
     .bind(email).run()
 
+  /**
+   * 用途判断 —— 必须区分「注册」和「找回密码」。
+   *
+   * 前端注册页和找回密码页**共用这个接口**（都传 place + flag=2），
+   * 但 regist 校验 purpose='register'、重置密码校验 purpose='reset'。
+   *
+   * 之前写死 'reset'，导致新用户注册永远报「验证码不存在或已使用」，
+   * 实测确认。判据：邮箱是否已注册。
+   */
+  const exists = await c.env.DB
+    .prepare(`SELECT id FROM users WHERE email=?1`)
+    .bind(email).first()
+  const purpose = exists ? 'reset' : 'register'
+
   await c.env.DB
     .prepare(`INSERT INTO email_codes (email,code,purpose,attempts,used,expires_at,created_at)
-              VALUES (?1,?2,'reset',0,0,?3,?4)`)
-    .bind(email, code, expires, nowIso()).run()
+              VALUES (?1,?2,?3,0,0,?4,?5)`)
+    .bind(email, code, purpose, expires, nowIso()).run()
 
   try {
     await sendMail(c.env as never, {

@@ -105,13 +105,33 @@ legacy.route('/user', user)
  * 否则未登录访问 /admin/user/changeUserLv 会命中这里，
  * 拿到 200 + 空数组，看起来"调用成功"，实际是鉴权缺失的假象。
  */
+/**
+ * 兜底路由
+ *
+ * 重要：`/admin/*` 这类前缀会被**原样当作路径**匹配。
+ * admin.ts 里的路由都挂在 `/` 根上（如 `/user/changeUserLv`），
+ * 前端如果调 `/admin/user/changeUserLv` 就会落到这里。
+ *
+ * 原实现返回 `ok([])`，前端拿到空数组当成功，
+ * 表现为「点了没反应」——排查时极难定位（实测浪费很多时间）。
+ *
+ * 现在对管理路径明确返回 404，让问题立刻暴露。
+ */
 legacy.all('/*', async (c) => {
   const path = c.req.path
-  const needsAuth =
-    path.includes('/admin/') ||
-    /\/user\/(change|delete|list)/.test(path) ||
-    /\/(save|update|delete)[A-Z]/.test(path)
+  const isAdminPath = path.includes('/admin/')
 
+  if (isAdminPath) {
+    const { guardUser } = await import('./guard')
+    const u = await guardUser(c)
+    if (!u) return legacyErr('请先登录', 401)
+    if (u.user_type > 1) return legacyErr('需要管理员权限', 403)
+
+    // 已登录管理员但路径不存在 → 明确报错，不要静默返回空
+    return legacyErr(`接口不存在：${path}`, 404)
+  }
+
+  const needsAuth = /\/user\/(change|delete|list)/.test(path) || /\/(save|update|delete)[A-Z]/.test(path)
   if (needsAuth) {
     const { guardUser } = await import('./guard')
     const u = await guardUser(c)

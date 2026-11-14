@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import type { Env, PostRow, UserRow } from '../lib/types'
 import { legacyOk, legacyErr } from './response'
-import { requireWrite, requireBoss } from './guard'
+import { requireWrite, requireBoss, guardUser } from './guard'
+import { audit, clientIp } from '../lib/audit'
+import { submitIndexNow, resolveHost } from '../lib/indexnow'
 import { readConfig, writeConfig } from '../lib/siteConfig'
 import { deriveSorts, deriveLabels, toLegacyArticle } from './mapper'
 import { stripFrontmatter, parseArr } from '../lib/posts'
@@ -22,6 +24,45 @@ import { nowIso } from '../lib/crypto'
 export const admin = new Hono<{ Bindings: Env }>()
 
 /* ── 文章 ─────────────────────────────────────────────────── */
+
+
+/**
+ * GET /admin/audit/list —— 审计日志查询
+ *
+ * 只给站长看（user_type === 0），因为日志里含管理员的 IP 和操作明细。
+ */
+admin.get('/admin/audit/list', async (c) => {
+  const denied = await requireBoss(c)
+  if (denied) return denied
+
+  const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 50))
+  const offset = Math.max(0, Number(c.req.query('offset')) || 0)
+
+  const total = (await c.env.DB
+    .prepare(`SELECT COUNT(*) c FROM audit_log`)
+    .first<{ c: number }>())?.c ?? 0
+
+  const { results } = await c.env.DB
+    .prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT ?1 OFFSET ?2`)
+    .bind(limit, offset)
+    .all<Record<string, unknown>>()
+
+  return legacyOk({
+    records: results.map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      username: r.username,
+      action: r.action,
+      target: r.target,
+      detail: r.detail,
+      ip: r.ip,
+      createTime: r.created_at
+    })),
+    total,
+    limit,
+    offset
+  })
+})
 
 /** POST /article/saveArticle */
 admin.post('/article/saveArticle', async (c) => {
@@ -65,8 +106,27 @@ admin.post('/article/saveArticle', async (c) => {
     .run()
   // resolveNames 内部已 await，这里同步取结果
 
+  const newId = Number(res.meta.last_row_id)
 
-  return legacyOk({ id: Number(res.meta.last_row_id), slug })
+  /**
+   * IndexNow 推送：新文章上线，通知搜索引擎来抓。
+   *
+   * 用 waitUntil 异步发，不阻塞保存响应 ——
+   * 推送失败也不影响文章已存进数据库这个事实。
+   */
+  const host = resolveHost(c.env)
+  if (c.env.INDEXNOW_KEY) {
+    const urls = [
+      `https://${host}/`,
+      `https://${host}/article/${newId}`,
+      `https://${host}/sort`
+    ]
+    c.executionCtx?.waitUntil?.(
+      submitIndexNow(host, c.env.INDEXNOW_KEY, urls)
+    )
+  }
+
+  return legacyOk({ id: newId, slug })
 })
 
 /** POST /article/updateArticle */
@@ -102,6 +162,15 @@ admin.post('/article/updateArticle', async (c) => {
 
   push('updated_at', nowIso())
   await c.env.DB.prepare(`UPDATE posts SET ${sets.join(',')} WHERE id=?${vals.length + 1}`).bind(...vals, id).run()
+
+  // 内容更新也推送一次，让搜索引擎重新抓
+  const host2 = resolveHost(c.env)
+  if (c.env.INDEXNOW_KEY) {
+    c.executionCtx?.waitUntil?.(
+      submitIndexNow(host2, c.env.INDEXNOW_KEY, [`https://${host2}/article/${id}`])
+    )
+  }
+
   return legacyOk({ updated: true })
 })
 
@@ -127,6 +196,11 @@ const deleteArticle = async (c: any) => {
   if (!exists) return legacyErr('文章不存在', 404)
 
   await c.env.DB.prepare(`DELETE FROM posts WHERE id=?1`).bind(id).run()
+  const _u = await guardUser(c)
+  await audit(c.env.DB, {
+    userId: _u?.id ?? 0, username: _u?.username ?? 'unknown',
+    action: 'article.delete', target: `article:${id}`, ip: clientIp(c)
+  })
   return legacyOk({ deleted: true, id })
 }
 
@@ -838,6 +912,11 @@ admin.get('/admin/user/changeUserType', async (c) => {
 
   await c.env.DB.prepare(`UPDATE users SET user_type=?1, role=?2 WHERE id=?3`)
     .bind(type, type <= 1 ? 'admin' : 'read', id).run()
+  const _u = await guardUser(c)
+  await audit(c.env.DB, {
+    userId: _u?.id ?? 0, username: _u?.username ?? 'unknown',
+    action: 'user.changeType', target: `user:${c.req.query('userId') || c.req.query('id')}`, ip: clientIp(c)
+  })
   return legacyOk({ updated: true })
 })
 
@@ -875,6 +954,11 @@ admin.get('/user/changeUserStatus', async (c) => {
   if (!Number.isFinite(id)) return legacyErr('id 非法', 400)
   await c.env.DB.prepare(`UPDATE users SET user_status=?1, disabled=?2 WHERE id=?3`)
     .bind(status === 'false' ? 0 : 1, status === 'false' ? 1 : 0, id).run()
+  const _u = await guardUser(c)
+  await audit(c.env.DB, {
+    userId: _u?.id ?? 0, username: _u?.username ?? 'unknown',
+    action: 'user.changeStatus', target: `user:${c.req.query('userId') || c.req.query('id')}`, ip: clientIp(c)
+  })
   return legacyOk({ updated: true })
 })
 
@@ -885,6 +969,16 @@ admin.get('/user/changeUserLv', async (c) => {
   const lv = Number(c.req.query('userLv'))
   if (!Number.isFinite(id) || !(lv >= 1 && lv <= 6)) return legacyErr('参数非法', 400)
   await c.env.DB.prepare(`UPDATE users SET user_lv=?1 WHERE id=?2`).bind(lv, id).run()
+
+  const _u = await guardUser(c)
+  await audit(c.env.DB, {
+    userId: _u?.id ?? 0,
+    username: _u?.username ?? 'unknown',
+    action: 'user.changeLv',
+    target: `user:${id}`,
+    ip: clientIp(c)
+  })
+
   return legacyOk({ updated: true })
 })
 
@@ -899,6 +993,11 @@ admin.get('/user/deleteUser', async (c) => {
     c.env.DB.prepare(`DELETE FROM sessions WHERE user_id=?1`).bind(id),
     c.env.DB.prepare(`DELETE FROM users WHERE id=?1`).bind(id)
   ])
+  const _u = await guardUser(c)
+  await audit(c.env.DB, {
+    userId: _u?.id ?? 0, username: _u?.username ?? 'unknown',
+    action: 'user.delete', target: `user:${c.req.query('userId') || c.req.query('id')}`, ip: clientIp(c)
+  })
   return legacyOk({ deleted: true })
 })
 

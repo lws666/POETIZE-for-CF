@@ -14,7 +14,7 @@ const SITE = 'https://www.lwsnb.eu.cc'
 /** GET /sitemap.xml */
 seo.get('/sitemap.xml', async (c) => {
   const { results } = await c.env.DB
-    .prepare(`SELECT slug, title, updated_at, date FROM posts WHERE draft=0 ORDER BY id DESC`)
+    .prepare(`SELECT id, slug, title, updated_at, date FROM posts WHERE draft=0 ORDER BY id DESC`)
     .all<PostRow>()
 
   const staticPages = [
@@ -40,7 +40,7 @@ seo.get('/sitemap.xml', async (c) => {
   </url>`),
     ...results.map(r => `
   <url>
-    <loc>${SITE}/article/${r.slug}</loc>
+    <loc>${SITE}/article/${r.id}</loc>
     <lastmod>${(r.updated_at || r.date || now).slice(0, 10)}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
@@ -93,7 +93,7 @@ Sitemap: ${SITE}/sitemap.xml
 /** GET /rss.xml —— 文章 RSS */
 seo.get('/rss.xml', async (c) => {
   const { results } = await c.env.DB
-    .prepare(`SELECT slug, title, excerpt, content, date, updated_at FROM posts WHERE draft=0 ORDER BY id DESC LIMIT 30`)
+    .prepare(`SELECT id, slug, title, excerpt, content, date, updated_at FROM posts WHERE draft=0 ORDER BY id DESC LIMIT 30`)
     .all<PostRow>()
 
   const esc = (s: string) =>
@@ -103,8 +103,8 @@ seo.get('/rss.xml', async (c) => {
   const items = results.map(r => `
     <item>
       <title>${esc(r.title)}</title>
-      <link>${SITE}/article/${r.slug}</link>
-      <guid isPermaLink="true">${SITE}/article/${r.slug}</guid>
+      <link>${SITE}/article/${r.id}</link>
+      <guid isPermaLink="true">${SITE}/article/${r.id}</guid>
       <description>${esc(r.excerpt || (r.content || '').slice(0, 200))}</description>
       <pubDate>${new Date(r.date || Date.now()).toUTCString()}</pubDate>
     </item>`).join('')

@@ -97,6 +97,14 @@ webInfo.get('/getWebInfo', async (c) => {
     webName: cfg.webName,
     webTitle: cfg.webTitle,
     /**
+     * author —— 站长昵称，侧栏作者卡片显示它。
+     *
+     * 与 webName（站点名）分开：webName 用在页头、版权声明、关于页，
+     * 改成作者名语义会乱（"洛神是指运行在...上的网站"）。
+     * 前端 myAside.vue 的 authorName 优先取这个，为空才回落 webName。
+     */
+    author: cfg.author || '',
+    /**
      * **notices / randomCover 必须返回 JSON 字符串，不是数组。**
      * 前端 store/index.js 的 loadWebInfo 会做：
      *   webInfo.notices = JSON.parse(webInfo.notices)

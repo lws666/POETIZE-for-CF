@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import { requireWrite } from './guard'
+import { rateOkDb } from '../lib/ratelimit'
 import type { Env, UserRow } from '../lib/types'
 import { legacyOk, legacyErr } from './response'
 import { currentUserLite } from '../lib/auth'
@@ -149,6 +151,11 @@ comment.post('/saveComment', async (c) => {
   const user = await currentUserLite(c.env.DB, c.req.header('Authorization'), c.req.header('Cookie'))
   if (!user) return legacyErr('请先登录后再评论', 401)
 
+  // 防刷屏：同一用户 1 分钟最多 5 条评论
+  if (!(await rateOkDb(c.env.DB, 'comment', user.id, 5, 60_000))) {
+    return legacyErr('评论太频繁，请稍后再试', 429)
+  }
+
   const b = await c.req.json<{
     source?: number; type?: string; commentContent?: string
     parentCommentId?: number; floorCommentId?: number
@@ -202,15 +209,51 @@ comment.post('/saveComment', async (c) => {
 })
 
 /** 评论点赞 */
+/**
+ * GET /comment/likeComment —— 点赞
+ *
+ * 安全修复：原来没有任何去重，同一用户/同一 IP 可以无限刷赞，
+ * 一个 curl 循环就能把 like_count 刷到任意值。
+ *
+ * 现在用 rate_limit 表做「24 小时内同一身份对同一评论只能赞一次」：
+ *   键 = like:<评论id>:<用户id 或 IP>
+ *   窗口 = 24 小时
+ *
+ * 重复点赞直接返回 liked:true 但不加计数（对用户表现为幂等，
+ * 不会报错打断体验）。
+ */
 comment.get('/likeComment', async (c) => {
   const id = Number(c.req.query('id'))
   if (!Number.isFinite(id)) return legacyErr('id 非法', 400)
-  await c.env.DB.prepare(`UPDATE poem_comment SET like_count=like_count+1 WHERE id=?1`).bind(id).run()
-  return legacyOk({ liked: true })
+
+  const user = await currentUserLite(c.env.DB, c.req.header('Authorization'), c.req.header('Cookie'))
+  const identity = user ? `u${user.id}` : `ip${c.req.header('CF-Connecting-IP') || 'unknown'}`
+
+  // 24 小时内只计一次
+  const allowed = await rateOkDb(c.env.DB, `like${id}`, identity, 1, 24 * 3600_000)
+
+  if (allowed) {
+    await c.env.DB
+      .prepare(`UPDATE poem_comment SET like_count=like_count+1 WHERE id=?1`)
+      .bind(id).run()
+  }
+
+  const row = await c.env.DB
+    .prepare(`SELECT like_count FROM poem_comment WHERE id=?1`)
+    .bind(id).first<{ like_count: number }>()
+
+  return legacyOk({ liked: true, likeCount: row?.like_count ?? 0 })
 })
 
 /** 后台：评论列表 */
 comment.post('/admin/listComment', async (c) => {
+  /**
+   * 安全修复：后台评论列表原来未鉴权，未登录就能读到
+   * 全部评论（含未审核内容）。
+   */
+  const denied = await requireWrite(c)
+  if (denied) return denied
+
   const b = await c.req.json<{ current?: number; size?: number; source?: number }>()
     .catch(() => ({} as { current?: number; size?: number; source?: number }))
   const current = Math.max(1, Number(b.current) || 1)
@@ -230,8 +273,17 @@ comment.post('/admin/listComment', async (c) => {
   })
 })
 
-/** 后台：删除评论（软删） */
+/**
+ * 后台：删除评论（软删）
+ *
+ * 安全修复：原来**完全没有鉴权**，未登录也能删任意评论
+ * （实测 curl 直接返回 {deleted:true}）。
+ * 现在要求 write 权限（站长/管理员）。
+ */
 comment.get('/admin/deleteComment', async (c) => {
+  const denied = await requireWrite(c)
+  if (denied) return denied
+
   const id = Number(c.req.query('id'))
   if (!Number.isFinite(id)) return legacyErr('id 非法', 400)
   await c.env.DB.prepare(`UPDATE poem_comment SET deleted=1 WHERE id=?1`).bind(id).run()

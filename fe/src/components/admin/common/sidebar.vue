@@ -49,9 +49,26 @@
 <script>
   export default {
     data() {
+      /**
+       * isBoss 判断要有兜底。
+       *
+       * 原来只读 $store.state.currentAdmin.isBoss。
+       * 如果 currentAdmin 为空（例如直接访问 /main 而没走登录流程、
+       * 或 store 恢复失败），isBoss 就是 undefined，
+       * 侧栏只会渲染 2 个非站长菜单（文章/评论管理），
+       * 其余 10 项全部消失，而且没有任何报错提示。
+       *
+       * 兜底顺序：currentAdmin → currentUser → localStorage
+       */
+      const admin = this.$store.state.currentAdmin || {}
+      const user = this.$store.state.currentUser || {}
+      let cached = {}
+      try { cached = JSON.parse(localStorage.getItem('currentAdmin') || '{}') } catch (e) { cached = {} }
+      const isBoss = !!(admin.isBoss || user.isBoss || cached.isBoss)
+
       return {
         isCollapse: this.$common.mobile(),
-        isBoss: this.$store.state.currentAdmin.isBoss,
+        isBoss,
         items: [{
           icon: "el-icon-s-home",
           index: "/main",

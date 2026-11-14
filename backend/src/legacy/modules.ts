@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Env, UserRow } from '../lib/types'
 import { legacyOk, legacyErr } from './response'
 import { requireWrite, requireLogin, guardUser } from './guard'
+import { rateOkDb } from '../lib/ratelimit'
 import { currentUserLite } from '../lib/auth'
 import { nowIso } from '../lib/crypto'
 import { sanitizeText, sanitizeUrl } from '../lib/sanitize'
@@ -185,6 +186,11 @@ modules.post('/weiYan/saveWeiYan', async (c) => {
   // 微言是用户发布内容，登录即可
   const denied = await requireLogin(c)
   if (denied) return denied
+
+  const _wu = await guardUser(c)
+  if (_wu && !(await rateOkDb(c.env.DB, 'weiyan', _wu.id, 3, 60_000))) {
+    return legacyErr('发布太频繁，请稍后再试', 429)
+  }
   const u = await me(c)
   if (!u) return legacyErr('请先登录', 401)
   const b = await c.req.json<{ content?: string; type?: string; isPublic?: boolean }>()
@@ -279,6 +285,11 @@ modules.post('/weiYan/saveNews', async (c) => {
  * 但登录了会记下 user_id 便于追溯。
  */
 modules.post('/webInfo/saveFriend', async (c) => {
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown'
+  if (!(await rateOkDb(c.env.DB, 'friend', ip, 3, 10 * 60_000))) {
+    return legacyErr('提交过于频繁，请 10 分钟后再试', 429)
+  }
+
   const me = await guardUser(c)
   const b = await c.req.json<{ title?: string; introduction?: string; cover?: string; url?: string }>()
     .catch(() => ({} as { title?: string; introduction?: string; cover?: string; url?: string }))
@@ -617,6 +628,12 @@ modules.post('/webInfo/saveTreeHole', async (c) => {
   if (denied) return denied
 
   const me = await guardUser(c)
+
+  // 防刷屏：同一用户 1 分钟最多 3 条树洞
+  if (me && !(await rateOkDb(c.env.DB, 'treehole', me.id, 3, 60_000))) {
+    return legacyErr('发言太频繁，请稍后再试', 429)
+  }
+
   const b = await c.req.json<{ message?: string; avatar?: string }>()
     .catch(() => ({} as { message?: string; avatar?: string }))
   const rawMsg = String(b.message || '').trim()
