@@ -95,10 +95,10 @@ function loadWidget(config) {
 			<canvas id="live2d" width="800" height="800"></canvas>
       <!-- 工具 -->
 			<div id="waifu-tool">
-				<span class="fa fa-lg fa-comment"></span>
-				<span class="fa fa-lg fa-street-view"></span>
-				<span class="fa fa-lg fa-mouse-pointer"></span>
-				<span class="fa fa-lg fa-times"></span>
+				<span class="fa fa-lg fa-comment" data-tip="换一句话" aria-label="换一句话"></span>
+				<span class="fa fa-lg fa-street-view" data-tip="换一个模型" aria-label="换一个模型"></span>
+				<span class="fa fa-lg fa-mouse-pointer" data-tip="开关点击特效" aria-label="开关点击特效"></span>
+				<span class="fa fa-lg fa-times" data-tip="隐藏看板娘（24 小时）" aria-label="隐藏看板娘"></span>
 			</div>
 		</div>`);
   setTimeout(() => {
@@ -250,7 +250,7 @@ function loadWidget(config) {
     showMessage(message, 4000, 10);
     if (!modelList) await loadModelList();
     // const target = randomSelection(modelList.models[modelId]);
-    const target = "HyperdimensionNeptunia/blanc_normal";
+    const target = "Potion-Maker/Pio";
     loadlive2d("live2d", `${cdnPath}model/${target}/index.json`);
   }
 
