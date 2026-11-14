@@ -144,19 +144,42 @@ const router = new VueRouter({
   }
 })
 
+/**
+ * 后台路由守卫
+ *
+ * 原来只认 adminToken。
+ * 但 adminToken 只有后台专用登录页 /verify 会设置；
+ * 用户从前台 /user 登录后拿到的是 userToken，
+ * 直接访问 /main 会被踢回 /verify —— 表现就是「登录了还是进不去后台」。
+ *
+ * 现在同时接受 userToken（需是站长/管理员身份）：
+ *   - 有 adminToken → 直接放行
+ *   - 没有 adminToken 但有 userToken 且 currentUser.isBoss → 自动补 adminToken 后放行
+ *   - 都没有 → 跳 /verify
+ */
 router.beforeEach((to, from, next) => {
   if (to.matched.some(record => record.meta.requiresAuth)) {
-    if (!Boolean(localStorage.getItem("adminToken"))) {
-      next({
-        path: '/verify',
-        query: {redirect: to.fullPath}
-      });
-    } else {
-      next();
+    const adminToken = localStorage.getItem('adminToken')
+    if (adminToken) return next()
+
+    // 回退：前台登录的站长
+    const userToken = localStorage.getItem('userToken')
+    let cur = {}
+    try { cur = JSON.parse(localStorage.getItem('currentUser') || '{}') } catch (e) { cur = {} }
+
+    if (userToken && cur && cur.isBoss) {
+      // 同步一份 adminToken / currentAdmin，后续后台请求都用它
+      localStorage.setItem('adminToken', userToken)
+      localStorage.setItem('currentAdmin', JSON.stringify(cur))
+      return next()
     }
-  } else {
-    next();
+
+    return next({
+      path: '/verify',
+      query: { redirect: to.fullPath }
+    })
   }
+  next()
 })
 
 export default router

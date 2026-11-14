@@ -63,8 +63,12 @@
       const admin = this.$store.state.currentAdmin || {}
       const user = this.$store.state.currentUser || {}
       let cached = {}
+      let cachedUser = {}
       try { cached = JSON.parse(localStorage.getItem('currentAdmin') || '{}') } catch (e) { cached = {} }
-      const isBoss = !!(admin.isBoss || user.isBoss || cached.isBoss)
+      try { cachedUser = JSON.parse(localStorage.getItem('currentUser') || '{}') } catch (e) { cachedUser = {} }
+      const isBoss = !!(admin.isBoss || user.isBoss || cached.isBoss || cachedUser.isBoss)
+
+
 
       return {
         isCollapse: this.$common.mobile(),
@@ -138,6 +142,24 @@
     watch: {},
 
     created() {
+      /**
+       * 后台登录态自动补齐。
+       *
+       * currentAdmin 只在 admin/verify.vue（后台专用登录页）里设置。
+       * 用户从前台 /user 登录后直接访问 /main 时 currentAdmin 是空的，
+       * 站长只能看到 2 个非站长菜单，其余 10 项全部消失。
+       *
+       * 检测到「有 currentUser 且是站长，但 currentAdmin 为空」时自动同步。
+       */
+      const admin = this.$store.state.currentAdmin || {}
+      const user = this.$store.state.currentUser || {}
+      if (!admin.isBoss) {
+        if (user && user.isBoss) {
+          this.$store.commit('loadCurrentAdmin', user)
+          this.isBoss = true
+        }
+      }
+
 
     },
 
