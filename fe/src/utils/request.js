@@ -11,7 +11,22 @@ axios.defaults.baseURL = constant.baseURL;
 
 // 添加请求拦截器
 axios.interceptors.request.use(function (config) {
-  // 在发送请求之前做些什么
+  /**
+   * 注入 CSRF token。
+   *
+   * 后端登录时下发一个非 HttpOnly 的 csrf cookie（双提交 Cookie 机制）。
+   * 这里从 document.cookie 读出，放进 X-CSRF-Token 头。
+   *
+   * 为什么需要：后端有 18 个写操作注册在 GET 上，
+   * SameSite=Lax 挡不住顶级导航的 GET 请求
+   * （管理员被诱导点一个链接即可触发删用户等操作）。
+   * 加上这个头后，跨站伪造者读不到 cookie 值，无法构造匹配的 header。
+   */
+  const m = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/)
+  if (m && m[1]) {
+    config.headers = config.headers || {}
+    config.headers['X-CSRF-Token'] = decodeURIComponent(m[1])
+  }
   return config;
 }, function (error) {
   // 对请求错误做些什么

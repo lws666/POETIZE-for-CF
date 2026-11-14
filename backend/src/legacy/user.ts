@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { Env, UserRow } from '../lib/types'
+import { genCsrfToken, CSRF_COOKIE } from '../lib/csrf'
 import { rateOkDb } from '../lib/ratelimit'
 import { findUserByName } from '../lib/auth'
 import { hashPassword, randomToken, sha256, verifyPassword, nowIso } from '../lib/crypto'
@@ -121,6 +122,14 @@ user.post('/login', async (c) => {
 
   const { sid } = await createSession(c.env.DB, u.id)
   setCookie(c, 'sid', sid, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_TTL_H * 3600 })
+  /**
+   * 同时下发 CSRF token。
+   * 注意 httpOnly: false —— 前端 JS 必须能读到它才能放进请求头，
+   * 这正是双提交 Cookie 的机制：攻击者跨域读不到，就伪造不出来。
+   */
+  setCookie(c, CSRF_COOKIE, genCsrfToken(), {
+    httpOnly: false, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_TTL_H * 3600
+  })
 
   return legacyOk(toUserVO(u, sid))
 })
@@ -199,6 +208,14 @@ user.post('/regist', async (c) => {
 
   const { sid } = await createSession(c.env.DB, id)
   setCookie(c, 'sid', sid, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_TTL_H * 3600 })
+  /**
+   * 同时下发 CSRF token。
+   * 注意 httpOnly: false —— 前端 JS 必须能读到它才能放进请求头，
+   * 这正是双提交 Cookie 的机制：攻击者跨域读不到，就伪造不出来。
+   */
+  setCookie(c, CSRF_COOKIE, genCsrfToken(), {
+    httpOnly: false, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_TTL_H * 3600
+  })
 
   return legacyOk(toUserVO(u, sid))
 })

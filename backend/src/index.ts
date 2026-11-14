@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { secureHeaders } from 'hono/secure-headers'
 import { logger } from 'hono/logger'
 import type { Env } from './lib/types'
+import { checkCsrf, CSRF_HEADER } from './lib/csrf'
 import type { AuthCtx } from './lib/auth'
 import { fail } from './lib/response'
 
@@ -87,6 +88,39 @@ app.use('/api/*', async (c, next) => {
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400
   })(c, next)
+})
+
+
+
+/**
+ * CSRF 校验
+ *
+ * 只对**依赖 Cookie 鉴权的请求**生效：
+ *   - 有 Authorization 头 → 豁免（脚本/前端 token 模式，无 CSRF 风险）
+ *   - 没有 sid cookie    → 豁免（未登录，后续 401 拦）
+ *   - 有 sid cookie      → 必须带 X-CSRF-Token，且与 csrf cookie 一致
+ *
+ * 为什么必须做：
+ *   有 18 个写操作注册在 GET 上（DELETE 用户、改等级等），
+ *   SameSite=Lax 只挡跨站 POST，挡不住顶级导航的 GET。
+ *   管理员被诱导点一个链接就能触发这些操作。
+ */
+app.use('/api/*', async (c, next) => {
+  const method = c.req.method.toUpperCase()
+  // OPTIONS 预检直接放行
+  if (method === 'OPTIONS') return next()
+
+  const okCsrf = checkCsrf(
+    method,
+    c.req.header('Cookie'),
+    c.req.header(CSRF_HEADER),
+    c.req.header('Authorization')
+  )
+
+  if (!okCsrf) {
+    return c.json({ success: false, error: 'CSRF 校验失败，请刷新页面重试', code: 'csrf_failed' }, 403)
+  }
+  return next()
 })
 
 /* ── 请求日志（仅开发/调试需要时打开）───────────────────── */
